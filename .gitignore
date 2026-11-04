@@ -1,0 +1,5 @@
+.DS_Store
+_out/
+*.app
+*.dmg
+*.zip
