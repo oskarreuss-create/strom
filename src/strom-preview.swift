@@ -531,6 +531,16 @@ struct PreviewWindow: View {
                         Text(t("Благодарим каждого, кто поддерживает STRÖM. Желаем приятного пользования! Если у вас возникнут вопросы, напишите нам по адресу, указанному ниже.")).fixedSize(horizontal: false, vertical: true)
                     }.font(.custom("Helvetica-Light", size: 12)).foregroundStyle(.secondary).padding(.top, 10)
                 }
+                DisclosureGroup(t("Лицензионное соглашение")) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text(t("Используя STRÖM, вы принимаете это соглашение. Если вы не согласны, не используйте программу.")).fixedSize(horizontal: false, vertical: true)
+                        Text(t("Основные возможности предоставляются бесплатно. Plus — один бессрочный платёж за одно устройство; ключ нельзя передавать, перепродавать или публиковать.")).fixedSize(horizontal: false, vertical: true)
+                        Text(t("Чтобы перенести Plus на другой Mac, отзовите активацию на прежнем устройстве. Если оно недоступно, напишите в поддержку.")).fixedSize(horizontal: false, vertical: true)
+                        Text(t("Программа обращается к серверу лицензий только для покупки, активации и проверки Plus и не собирает статистику.")).fixedSize(horizontal: false, vertical: true)
+                        Text(t("Исходный код доступен на GitHub по лицензии PolyForm Noncommercial 1.0.0: его можно использовать в личных и некоммерческих целях, но нельзя продавать программу или использовать её коммерчески без разрешения.")).fixedSize(horizontal: false, vertical: true)
+                        Text(t("Вы сами отвечаете за содержимое, которое загружаете и раздаёте, и за соблюдение законов вашей страны. Программа предоставляется «как есть», без гарантий; автор не отвечает за ущерб от её использования.")).fixedSize(horizontal: false, vertical: true)
+                    }.font(.custom("Helvetica-Light", size: 12)).foregroundStyle(.secondary).padding(.top, 10)
+                }
                 Divider()
                 HStack(alignment: .top) {
                     Text(t("Поддержка")); Spacer()
