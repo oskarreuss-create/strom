@@ -305,12 +305,12 @@ struct QuickHint: ViewModifier {
 struct PreviewWindow: View {
     @StateObject private var engine = StromEngine()
     @StateObject private var license = StromLicense()
-    @StateObject private var extras = ExtraAccess()
     @State private var notificationDelegate = StromNotificationDelegate()
     @AppStorage("downloadNotificationsEnabled") private var downloadNotificationsEnabled = false
     @State private var notificationPermissionDenied = false
     @State private var showLicense = false
     @State private var licenseInput = ""
+    @State private var discountStarted = false
     @StateObject private var sleepGuard = DownloadSleepGuard()
     @StateObject private var lidSleepGuard = LidSleepGuard()
     @AppStorage("preventSleepWithLidClosed") private var preventSleepWithLidClosed = false
@@ -344,10 +344,10 @@ struct PreviewWindow: View {
     private var activeDownloadIDs: [Int32] {
         engine.items.filter { !$0.complete && $0.error.isEmpty && !(engine.records[$0.id]?.paused ?? false) && !(engine.records[$0.id]?.stopped ?? false) }.map(\.id).sorted()
     }
-    private var premiumAccess: Bool { license.featureAccess || ExtraAccess.grantsPlus }
+    private var premiumAccess: Bool { license.featureAccess }
     private func refreshEnginePlusAccess() {
         engine.plusAllowed = { [weak license] in
-            license?.featureAccess == true || ExtraAccess.grantsPlus
+            license?.featureAccess == true
         }
     }
     private func updateSleepGuard() {
@@ -363,9 +363,7 @@ struct PreviewWindow: View {
           (isLight ? Color.white : Color.black).opacity(interfaceOpacity).ignoresSafeArea()
           ClearWindow().frame(width: 0, height: 0)
           WindowSizeController(compact: compact, count: min(4, items(for: 0).count)).frame(width: 0, height: 0)
-          if extras.panelVisible {
-              ExtraPanel(extras: extras, light: isLight, opacity: interfaceOpacity, surface: contentSurface)
-          } else if compact {
+          if compact {
               HStack(spacing: 0) {
                   let active = Array(items(for: 0).prefix(4))
                   if active.isEmpty {
@@ -523,7 +521,7 @@ struct PreviewWindow: View {
                     VStack(alignment: .leading, spacing: 10) {
                         HStack(alignment: .firstTextBaseline, spacing: 0) {
                             Text(t("Создавая "))
-                            ExtraTitle(extras: extras)
+                            Text("STRÖM")
                             Text(t(", мы прежде всего думали о дизайне, лёгкости и простоте интерфейса, а также о возможности отключить раздачу файлов другим участникам торрент-сети."))
                         }.fixedSize(horizontal: false, vertical: true)
                         Text(t("STRÖM — условно бесплатная программа: основные возможности доступны бесплатно и без ограничений по времени. Дополнительные функции для удобства доступны в Plus за один бессрочный платёж.")).fixedSize(horizontal: false, vertical: true)
@@ -581,7 +579,6 @@ struct PreviewWindow: View {
             }
         }
         .onChange(of: license.active) { _, _ in updateSleepGuard() }
-        .onChange(of: extras.revision) { _, _ in refreshEnginePlusAccess(); updateSleepGuard() }
         .onChange(of: preventSleepDuringDownloads) { _, _ in updateSleepGuard() }
         .onChange(of: preventSleepWithLidClosed) { _, _ in updateSleepGuard() }
         .onChange(of: lidSleepGuard.failure) { _, message in
@@ -631,8 +628,8 @@ struct PreviewWindow: View {
             }
         }
         .animation(.easeInOut(duration: 0.2), value: showLicense)
-        .overlay { ExtraOverlay(extras: extras) }
-        .onExitCommand { if extras.handleExit() {} else if showLicense { showLicense = false } else if compact { compact = false } else { selected = nil; showSettings = false } }
+        .onChange(of: showLicense) { _, shown in if !shown { discountStarted = false } }
+        .onExitCommand { if showLicense { showLicense = false } else if compact { compact = false } else { selected = nil; showSettings = false } }
         .alert(t("Magnet-ссылка"), isPresented: $showMagnet) {
             TextField("magnet:…", text: $magnet)
             Button(t("Отмена"), role: .cancel) {}
@@ -664,15 +661,17 @@ struct PreviewWindow: View {
                 if let checkout = license.checkoutURL { Button(t("Купить Plus")) { NSWorkspace.shared.open(checkout) } }
                 else { Text(t("Продажи и активация пока не настроены.")).font(.custom("Helvetica-Light", size: 12)).foregroundStyle(.secondary) }
                 Divider()
-                SecureField(t("Ключ лицензии"), text: $licenseInput).textFieldStyle(.roundedBorder)
+                SecureField(t("Ключ лицензии или код скидки"), text: $licenseInput).textFieldStyle(.roundedBorder)
                 if let recovery=license.recoveryURL(language: language) { Button(t("Получить ключ по почте")) { NSWorkspace.shared.open(recovery) } }
                 Button(t("Активировать или восстановить")) { Task {
-                    if await extras.intercept(licenseInput) { licenseInput = ""; showLicense = false; showSettings = false }
+                    if StromLicense.looksLikeDiscountCode(licenseInput) {
+                        if let checkout = await license.discountCheckoutURL(code: licenseInput, language: language) { NSWorkspace.shared.open(checkout); licenseInput = ""; discountStarted = true }
+                    }
                     else { await license.activate(licenseInput); if license.active { licenseInput = "" } }
-                } }.disabled(license.busy || extras.busy || licenseInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                } }.disabled(license.busy || licenseInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
+            if discountStarted { Text(t("Завершите оформление в браузере. Ключ придёт на почту — введите его здесь.")).font(.custom("Helvetica-Light", size: 12)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
             if !license.error.isEmpty { Text(t(license.error)).font(.custom("Helvetica-Light", size: 12)).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true) }
-            if !extras.notice.isEmpty { Text(extras.notice).font(.custom("Helvetica-Light", size: 12)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true) }
         }.padding(26).frame(width: 440)
     }
     private func t(_ key: String) -> String { tr(key, language) }

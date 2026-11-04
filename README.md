@@ -10,6 +10,7 @@
 - Free, with no time limit: torrent files and magnet links, pause, sorting, compact mode, notifications, and the option to disable sharing.
 - Interface in 6 languages: English (default), Deutsch, Français, Italiano, Русский, Español.
 - **Plus** — a one-time payment of $7 for one device; works offline after activation. Extra conveniences, such as keeping the Mac awake during downloads and removing the .torrent file after completion.
+- **Discount codes:** if you have one, enter it in the same field as the license key — you will be taken to a checkout page with the discount applied.
 
 ## Requirements
 macOS 26 or later, Apple Silicon.

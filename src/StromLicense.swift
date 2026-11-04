@@ -8,6 +8,7 @@ private enum LicenseFailure: Error { case storage, invalidToken, unconfigured, n
 private struct LicenseSaved: Codable, Sendable { let key: String; let token: String }
 private struct LicensePayload: Codable { let version: Int; let platform: String; let device: String; let license_id: String; let issued_at: Int64 }
 private struct LicenseReply: Codable { let license: String?; let deactivated: Bool?; let error: String? }
+private struct CheckoutReply: Decodable { let url: String?; let error: String? }
 private struct LicenseStorage: Sendable {
     let service: String
     private func query(_ account: String) -> [String: Any] {
@@ -125,6 +126,27 @@ private struct LicenseStorage: Sendable {
             await refresh()
         }catch{self.error=errorMessage(error)}
     }
+    /// A discount code is typed into the same field as the license key.
+    nonisolated static func looksLikeDiscountCode(_ text:String)->Bool {
+        let t=text.uppercased().filter{!$0.isWhitespace && $0 != "-"}
+        guard t.count==16,t.hasPrefix("SALE") else{return false}
+        return t.dropFirst(4).allSatisfy{"ABCDEFGHJKLMNPQRSTUVWXYZ23456789".contains($0)}
+    }
+    /// Asks the license service for a Stripe Checkout page that applies the code. Nothing is charged here.
+    func discountCheckoutURL(code:String,language:String) async -> URL? {
+        guard !busy else{return nil};error="";busy=true;defer{busy=false}
+        do {
+            guard let base=serviceURL else{throw LicenseFailure.unconfigured}
+            var request=URLRequest(url:base.appendingPathComponent("v1").appendingPathComponent("checkout"));request.httpMethod="POST"
+            request.setValue("application/json",forHTTPHeaderField:"Content-Type");request.timeoutInterval=20
+            request.httpBody=try JSONSerialization.data(withJSONObject:["code":code,"lang":language])
+            let(data,response)=try await URLSession.shared.data(for:request)
+            guard let http=response as? HTTPURLResponse else{throw LicenseFailure.network}
+            let reply=try? JSONDecoder().decode(CheckoutReply.self,from:data)
+            guard (200..<300).contains(http.statusCode),let text=reply?.url,let url=URL(string:text),url.scheme=="https",let host=url.host,host=="stripe.com" || host.hasSuffix(".stripe.com") else{throw LicenseFailure.remote(reply?.error ?? "unknown")}
+            return url
+        }catch{self.error=errorMessage(error);return nil}
+    }
     func deactivate() async {
         guard !busy else{return};error="";busy=true;defer{busy=false};let store=storage
         do {
@@ -135,7 +157,7 @@ private struct LicenseStorage: Sendable {
     }
     private func errorMessage(_ error:Error)->String {
         if let problem=error as? LicenseFailure {
-            switch problem {case .remote(let code):if code=="already_active" || code=="activation_failed"{return "Лицензия уже активирована на другом устройстве."};if code=="invalid_license" || code=="invalid_key"{return "Ключ не подходит для этой версии STRÖM."};return "Не удалось связаться с сервисом лицензий."
+            switch problem {case .remote(let code):if code=="already_active" || code=="activation_failed"{return "Лицензия уже активирована на другом устройстве."};if code=="invalid_code"{return "Код скидки недействителен, просрочен или уже использован."};if code=="try_later"{return "Слишком много попыток. Попробуйте позже."};if code=="invalid_license" || code=="invalid_key"{return "Ключ не подходит для этой версии STRÖM."};return "Не удалось связаться с сервисом лицензий."
             case .storage:return "Не удалось сохранить лицензию в Связке ключей."
             case .invalidToken:return "Не удалось проверить подлинность лицензии."
             case .unconfigured:return "Продажи и активация пока не настроены."

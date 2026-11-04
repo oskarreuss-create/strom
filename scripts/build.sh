@@ -14,7 +14,8 @@ mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources/Licenses" "$app/Contents
 swift_files=("$root"/src/*.swift)
 main_files=(); for f in "${swift_files[@]}"; do [ "$(basename "$f")" = StromSleepWatchdog.swift ] || main_files+=("$f"); done
 c++ -std=c++17 -c -I"$LIBTORRENT_INCLUDE" -I/opt/homebrew/include "$root/src/strom-engine.cpp" -o "$b/engine.o"
-swiftc -parse-as-library "${main_files[@]}" "$b/engine.o" -L"$LIBTORRENT_LIB" -ltorrent-rasterbar -lc++ \
+# STROM_SWIFT_FLAGS is for the sandbox QA build only (e.g. -DSTROM_LICENSE_TESTING).
+swiftc ${STROM_SWIFT_FLAGS:-} -parse-as-library "${main_files[@]}" "$b/engine.o" -L"$LIBTORRENT_LIB" -ltorrent-rasterbar -lc++ \
   -Xlinker -rpath -Xlinker @executable_path/../Frameworks -o "$app/Contents/MacOS/Strom"
 swiftc "$root/src/StromSleepWatchdog.swift" -o "$app/Contents/MacOS/StromSleepWatchdog"
 cp "$root/resources/Info.plist" "$app/Contents/Info.plist"
