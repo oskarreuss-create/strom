@@ -159,7 +159,7 @@ final class StromStreamServer: @unchecked Sendable {
         case "mkv": return "video/x-matroska"
         case "webm": return "video/webm"
         case "avi": return "video/x-msvideo"
-        case "ts": return "video/mp2t"
+        case "ts", "m2ts", "mts": return "video/mp2t"
         default: return "application/octet-stream"
         }
     }

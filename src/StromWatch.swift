@@ -12,7 +12,7 @@ import AppKit
     private var task: Task<Void, Never>?
     private var token: String?
     private var active: (item: TorrentItem, file: Int)?
-    private static let video: Set<String> = ["mp4", "m4v", "mov", "mkv", "avi", "webm", "ts", "mpg", "mpeg", "wmv", "flv"]
+    private static let video: Set<String> = ["mp4", "m4v", "mov", "mkv", "avi", "webm", "ts", "m2ts", "mts", "mpg", "mpeg", "wmv", "flv"]
 
     func start(_ item: TorrentItem, engine: StromEngine, open: @escaping @MainActor (URL) -> Void) {
         stop(engine: engine)

@@ -969,7 +969,7 @@ struct PreviewWindow: View {
     private func videoFile(for item: TorrentItem) -> URL? {
         guard let folder = engine.records[item.id]?.directory, !item.name.isEmpty else { return nil }
         let target = URL(fileURLWithPath: folder, isDirectory: true).appendingPathComponent(item.name)
-        let video: Set<String> = ["mp4", "m4v", "mov", "mkv", "avi", "webm", "ts", "mpg", "mpeg", "wmv", "flv"]
+        let video: Set<String> = ["mp4", "m4v", "mov", "mkv", "avi", "webm", "ts", "m2ts", "mts", "mpg", "mpeg", "wmv", "flv"]
         var isDirectory: ObjCBool = false
         guard FileManager.default.fileExists(atPath: target.path, isDirectory: &isDirectory) else { return nil }
         if !isDirectory.boolValue { return video.contains(target.pathExtension.lowercased()) ? target : nil }

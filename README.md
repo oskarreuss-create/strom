@@ -4,10 +4,6 @@
 
 **A light, beautiful BitTorrent client for macOS — with the option to turn off seeding.**
 
-![STRÖM torrent client and BÜHNE video player for macOS](docs/social-preview.png)
-
-Free **torrent client for Mac** (macOS 26, Apple Silicon): **BitTorrent downloader** for **magnet links and .torrent files**, built on **libtorrent** in native Swift / SwiftUI. Light and quiet, with an option to **turn off seeding / uploading**, and a lighter alternative to Transmission, qBittorrent and uTorrent. Pairs with the **BÜHNE video player** so you can **watch while downloading**.
-
 > I had been looking for a light, good-looking torrent client that lets you switch off uploading to other peers. I couldn't find one, so I made it myself. Now I'm happy to share it with you. Please enjoy.
 
 ## Features
