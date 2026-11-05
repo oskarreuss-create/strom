@@ -311,6 +311,16 @@ struct PreviewWindow: View {
     @State private var showLicense = false
     @State private var licenseInput = ""
     @State private var discountStarted = false
+    @StateObject private var usage = StromUsage()
+    @AppStorage("agreementVersionAccepted") private var acceptedAgreement = ""
+    @AppStorage("consentSentVersion") private var consentSent = ""
+    @AppStorage("statsEnabled") private var statsEnabled = false
+    @State private var agreementStep = 0
+    @State private var agreementReview = false
+    @State private var consentBusy = false
+    @StateObject private var update = StromUpdate()
+    @AppStorage("updateCheckEnabled") private var updateCheckEnabled = true
+    @AppStorage("updateDismissedVersion") private var updateDismissed = ""
     @StateObject private var sleepGuard = DownloadSleepGuard()
     @StateObject private var lidSleepGuard = LidSleepGuard()
     @AppStorage("preventSleepWithLidClosed") private var preventSleepWithLidClosed = false
@@ -529,14 +539,22 @@ struct PreviewWindow: View {
                         Text(t("Благодарим каждого, кто поддерживает STRÖM. Желаем приятного пользования! Если у вас возникнут вопросы, напишите нам по адресу, указанному ниже.")).fixedSize(horizontal: false, vertical: true)
                     }.font(.custom("Helvetica-Light", size: 12)).foregroundStyle(.secondary).padding(.top, 10)
                 }
-                DisclosureGroup(t("Лицензионное соглашение")) {
+                DisclosureGroup(t("Обновления")) {
                     VStack(alignment: .leading, spacing: 10) {
-                        Text(t("Используя STRÖM, вы принимаете это соглашение. Если вы не согласны, не используйте программу.")).fixedSize(horizontal: false, vertical: true)
-                        Text(t("Основные возможности предоставляются бесплатно. Plus — один бессрочный платёж за одно устройство; ключ нельзя передавать, перепродавать или публиковать.")).fixedSize(horizontal: false, vertical: true)
-                        Text(t("Чтобы перенести Plus на другой Mac, отзовите активацию на прежнем устройстве. Если оно недоступно, напишите в поддержку.")).fixedSize(horizontal: false, vertical: true)
-                        Text(t("Программа обращается к серверу лицензий только для покупки, активации и проверки Plus и не собирает статистику.")).fixedSize(horizontal: false, vertical: true)
-                        Text(t("Исходный код доступен на GitHub по лицензии PolyForm Noncommercial 1.0.0: его можно использовать в личных и некоммерческих целях, но нельзя продавать программу или использовать её коммерчески без разрешения.")).fixedSize(horizontal: false, vertical: true)
-                        Text(t("Вы сами отвечаете за содержимое, которое загружаете и раздаёте, и за соблюдение законов вашей страны. Программа предоставляется «как есть», без гарантий; автор не отвечает за ущерб от её использования.")).fixedSize(horizontal: false, vertical: true)
+                        Toggle(t("Проверять обновления автоматически"), isOn: $updateCheckEnabled).toggleStyle(.switch)
+                        HStack {
+                            Button(t("Проверить сейчас")) { Task { await update.check(endpoint: license.updateEndpoint, force: true) } }.disabled(update.checking)
+                            if let offer = update.offer { Text("\(t("Доступна новая версия STRÖM")): \(offer.version)").foregroundStyle(.primary); Button(t("Скачать")) { NSWorkspace.shared.open(offer.url) } }
+                            else if update.status == "latest" { Text(t("У вас установлена последняя версия.")) }
+                            else if update.status == "failed" { Text(t("Не удалось проверить обновления.")) }
+                        }
+                    }.font(.custom("Helvetica-Light", size: 12)).foregroundStyle(.secondary).padding(.top, 10)
+                }
+                DisclosureGroup(t("Конфиденциальность и условия")) {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Toggle(t("Отправлять анонимную статистику использования"), isOn: $statsEnabled).toggleStyle(.switch)
+                        Text(t("Только счётчики: запуски, время работы, число загрузок и гигабайты. Без имён файлов, ссылок, почты, ключа и IP-адреса.")).fixedSize(horizontal: false, vertical: true)
+                        Button(t("Показать условия и политику конфиденциальности")) { showSettings = false; agreementReview = true; agreementStep = 1 }
                     }.font(.custom("Helvetica-Light", size: 12)).foregroundStyle(.secondary).padding(.top, 10)
                 }
                 Divider()
@@ -552,6 +570,9 @@ struct PreviewWindow: View {
           }
         }
         .onAppear {
+            if acceptedAgreement != agreementVersion { agreementStep = 1 } else if consentSent != agreementVersion { retryConsent() }
+            usage.noteLaunch()
+            if updateCheckEnabled, acceptedAgreement == agreementVersion { Task { await update.check(endpoint: license.updateEndpoint, force: false) } }
             refreshEnginePlusAccess()
             UNUserNotificationCenter.current().delegate = notificationDelegate
             engine.onDownloadEvent = { event, name in
@@ -599,6 +620,20 @@ struct PreviewWindow: View {
         .onReceive(Timer.publish(every: 300, on: .main, in: .common).autoconnect()) { _ in
             Task { await license.refresh() }
         }
+        .onReceive(Timer.publish(every: 10, on: .main, in: .common).autoconnect()) { _ in
+            usage.tick(engine.items)
+            Task { await usage.sendIfDue(license, language: language) }
+        }
+        .onReceive(Timer.publish(every: 3600, on: .main, in: .common).autoconnect()) { _ in
+            if updateCheckEnabled, acceptedAgreement == agreementVersion { Task { await update.check(endpoint: license.updateEndpoint, force: false) } }
+        }
+        .onChange(of: acceptedAgreement) { _, _ in
+            if updateCheckEnabled { Task { await update.check(endpoint: license.updateEndpoint, force: false) } }
+        }
+        .onChange(of: statsEnabled) { _, on in
+            if on { usage.noteLaunch() } else { usage.reset() }
+            if acceptedAgreement == agreementVersion { retryConsent() }
+        }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.willTerminateNotification)) { _ in lidSleepGuard.stop(); engine.flush() }
         .onReceive(appDelegate.$pendingFiles) { urls in
             guard !urls.isEmpty else { return }
@@ -629,7 +664,9 @@ struct PreviewWindow: View {
         }
         .animation(.easeInOut(duration: 0.2), value: showLicense)
         .onChange(of: showLicense) { _, shown in if !shown { discountStarted = false } }
-        .onExitCommand { if showLicense { showLicense = false } else if compact { compact = false } else { selected = nil; showSettings = false } }
+        .overlay(alignment: .top) { updateBanner }
+        .overlay { if agreementStep != 0 { agreementWindow } }
+        .onExitCommand { if agreementStep != 0 { if agreementReview { agreementStep = 0; agreementReview = false } } else if showLicense { showLicense = false } else if compact { compact = false } else { selected = nil; showSettings = false } }
         .alert(t("Magnet-ссылка"), isPresented: $showMagnet) {
             TextField("magnet:…", text: $magnet)
             Button(t("Отмена"), role: .cancel) {}
@@ -647,6 +684,87 @@ struct PreviewWindow: View {
             if value && !premiumAccess { licenseInput = ""; showLicense = true }
             else { binding.wrappedValue = value }
         })
+    }
+    @ViewBuilder private var updateBanner: some View {
+        if agreementStep == 0, updateCheckEnabled, let offer = update.offer, updateDismissed != offer.version {
+            HStack(spacing: 12) {
+                Text("\(t("Доступна новая версия STRÖM")): \(offer.version)").font(.custom("Helvetica", size: 12))
+                Button(t("Скачать")) { NSWorkspace.shared.open(offer.url) }.buttonStyle(.borderedProminent).controlSize(.small)
+                Button(t("Позже")) { updateDismissed = offer.version }.buttonStyle(.bordered).controlSize(.small)
+            }
+            .padding(.horizontal, 16).padding(.vertical, 9)
+            .background(.regularMaterial, in: Capsule()).glassEffect(.regular, in: .capsule).shadow(radius: 10).padding(.top, 14)
+            .transition(.opacity)
+        }
+    }
+    private func finishAgreement(stats: Bool) {
+        statsEnabled = stats; acceptedAgreement = agreementVersion; agreementStep = 0; agreementReview = false
+        retryConsent()
+    }
+    /// One send at a time: two at once would race to create the device key.
+    private func retryConsent() {
+        guard !consentBusy else { return }
+        consentBusy = true
+        let lang = language, stats = statsEnabled
+        Task {
+            let ok = await license.sendConsent(version: agreementVersion, stats: stats, language: lang)
+            consentBusy = false
+            if ok { consentSent = agreementVersion }
+        }
+    }
+    /// Two windows in a row on first launch: 1) terms and information, 2) privacy, cookies and statistics.
+    private var agreementWindow: some View {
+        let pack = agreementPacks[language] ?? agreementPacks["en"]!
+        let sections = agreementStep == 1 ? pack.terms : pack.privacy
+        return VStack(alignment: .leading, spacing: 14) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(agreementStep == 1 ? pack.termsTitle : pack.privacyTitle).font(.custom("HelveticaNeue-Light", size: 26))
+                Spacer()
+                Text("\(pack.step) \(agreementStep)/2 · \(pack.version) \(agreementVersion)").font(.custom("Helvetica-Light", size: 11)).foregroundStyle(.secondary)
+            }
+            HStack {
+                Text(pack.language).font(.custom("Helvetica-Light", size: 12)).foregroundStyle(.secondary)
+                Picker("", selection: $language) { ForEach(agreementLanguages, id: \.code) { Text($0.name).tag($0.code) } }.labelsHidden().pickerStyle(.menu).fixedSize()
+                Spacer()
+            }
+            Divider().opacity(0.4)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    ForEach(Array(sections.enumerated()), id: \.offset) { _, section in
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(section.0).font(.custom("Helvetica", size: 13))
+                            Text(section.1).font(.custom("Helvetica-Light", size: 12)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                    if agreementStep == 1 {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(pack.laws).font(.custom("Helvetica", size: 13))
+                            ForEach(agreementLaws, id: \.1) { law in Link(law.0, destination: URL(string: law.1)!).font(.custom("Helvetica-Light", size: 12)) }
+                        }
+                    }
+                }.padding(.trailing, 8)
+            }
+            Divider().opacity(0.4)
+            HStack {
+                if agreementReview {
+                    Spacer()
+                    if agreementStep == 1 { Button(pack.step.isEmpty ? "→" : "→ 2/2") { agreementStep = 2 }.buttonStyle(.bordered) }
+                    Button("OK") { agreementStep = 0; agreementReview = false }.buttonStyle(.borderedProminent)
+                } else if agreementStep == 1 {
+                    Button(pack.decline, role: .destructive) { NSApplication.shared.terminate(nil) }.buttonStyle(.bordered)
+                    Spacer()
+                    Button(pack.accept) { agreementStep = 2 }.buttonStyle(.borderedProminent)
+                } else {
+                    Button(pack.statsNo) { finishAgreement(stats: false) }.buttonStyle(.bordered)
+                    Spacer()
+                    Button(pack.statsYes) { finishAgreement(stats: true) }.buttonStyle(.borderedProminent)
+                }
+            }
+        }
+        .padding(26)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 24)).glassEffect(.regular, in: .rect(cornerRadius: 24)).padding(18)
+        .transition(.opacity)
     }
     private var licensePanel: some View {
         VStack(alignment: .leading, spacing: 16) {

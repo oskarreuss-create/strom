@@ -38,10 +38,33 @@ scripts/build.sh "$PWD/_out/STRÖM.app"
 The script never overwrites an existing `.app` and signs the build ad hoc (for local use only).
 
 ## Privacy
-No analytics. The app contacts `strom.oskarreus.ch` only to purchase, activate and verify a Plus license.
+No tracking, no ads, no cookies. The app contacts `strom.oskarreus.ch` to buy, activate and verify a Plus license and to record that you accepted the terms. Optional anonymous usage statistics are sent only if you allow them (off by default); they cannot be linked to you. See the full text below.
 
 ## License
 Source code is available under the [PolyForm Noncommercial License 1.0.0](LICENSE): you may read, modify and use it for personal and non-commercial purposes. Selling it, publishing paid forks or commercial use without permission is not allowed. See [NOTICE](NOTICE). Bundled third-party components (libtorrent-rasterbar, OpenSSL) keep their own licenses: [resources/Licenses](resources/Licenses). Other terms: info@oskarreus.ch.
 
 ## Support
 Questions and bugs: [Issues](../../issues) or info@oskarreus.ch. Never post license keys in Issues.
+
+<!-- legal:start -->
+## Philosophy
+STRÖM is a light, beautiful BitTorrent client for macOS. We believe a tool should be fast, quiet and simple, should leave you in control (you can switch off sharing with other peers), and should respect your privacy: no hidden tracking, no ads, nothing sold.
+
+## Privacy and statistics at a glance
+- **Cookies.** The STRÖM app uses no cookies and no tracking technologies.
+- **What never leaves your Mac.** Your torrent list, file names, magnet links, downloaded files, settings and the peers you connect to stay on your Mac.
+- **Purchase and license data.** When you buy Plus, Stripe processes the payment; we never see your card data.
+- **Update check.** Once a day (and when you press “Check now”) STRÖM asks our server whether a new version exists.
+- **Anonymous usage statistics (optional).** Only if you allow it, STRÖM sends once a day: number of launches, active time, number of completed downloads, total gigabytes downloaded and uploaded, app version, macOS version and interface language.
+- **How statistics are protected.** Statistics use a random installation number created by the app.
+
+## Full text
+- [Terms of use / Privacy, cookies and statistics](AGREEMENT.en.md)
+
+Legal texts:
+- [GDPR / DSGVO — Regulation (EU) 2016/679](https://eur-lex.europa.eu/eli/reg/2016/679/oj)
+- [Swiss Federal Act on Data Protection (FADP / nDSG), SR 235.1](https://www.fedlex.admin.ch/eli/cc/2022/491/en)
+- [Swiss Copyright Act (URG / CopA), SR 231.1](https://www.fedlex.admin.ch/eli/cc/1993/1798_1798_1798/en)
+- [PolyForm Noncommercial License 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0)
+- [Stripe Privacy Policy (payment page)](https://stripe.com/privacy)
+<!-- legal:end -->

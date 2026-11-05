@@ -147,6 +147,44 @@ private struct LicenseStorage: Sendable {
             return url
         }catch{self.error=errorMessage(error);return nil}
     }
+    /// Records that the user accepted the agreement (version, choice); the server adds the time. Signed with the device key.
+    func sendConsent(version: String, stats: Bool, language: String) async -> Bool {
+        guard let base = serviceURL else { debugLog("consent: no service URL"); return false }
+        do {
+            let store = storage
+            let id = try await Task.detached { try store.identity(create: true) }.value
+            let device = encode64(id.publicKey.rawRepresentation)
+            let nonce = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased(), timestamp = Int64(Date().timeIntervalSince1970 * 1000)
+            let appVersion = (info["CFBundleShortVersionString"] as? String) ?? "unknown"
+            let message = "consent\n\(version)\n\(stats ? 1 : 0)\n\(language)\n\(appVersion)\n\(device)\n\(nonce)\n\(timestamp)"
+            let signature = encode64(try id.signature(for: Data(message.utf8)))
+            let object: [String: Any] = ["version": version, "stats": stats, "lang": language, "appVersion": appVersion, "device": device, "nonce": nonce, "timestamp": timestamp, "signature": signature]
+            let ok = try await postJSON(base, "consent", object); debugLog("consent: sent, accepted=\(ok)"); return ok
+        } catch { debugLog("consent: failed \(error)"); return false }
+    }
+    /// Anonymous counters (only when the user allowed them). Carries no license, device key or e-mail.
+    func sendStats(_ report: [String: Any]) async -> Bool {
+        guard let base = serviceURL else { return false }
+        return (try? await postJSON(base, "stats", report)) ?? false
+    }
+    private func postJSON(_ base: URL, _ path: String, _ object: [String: Any]) async throws -> Bool {
+        var request = URLRequest(url: base.appendingPathComponent("v1").appendingPathComponent(path)); request.httpMethod = "POST"; request.timeoutInterval = 20
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type"); request.httpBody = try JSONSerialization.data(withJSONObject: object)
+        let (data, response) = try await URLSession.shared.data(for: request)
+        let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        debugLog("post \(path): status \(status) \(String(data: data, encoding: .utf8) ?? "")")
+        return status / 100 == 2
+    }
+    /// Test builds only (STROM_LICENSE_TESTING); the release build prints nothing.
+    private func debugLog(_ text: String) {
+        #if STROM_LICENSE_TESTING
+        NSLog("STROM %@", text)
+        let line = "\(Date()) \(text)\n", url = URL(fileURLWithPath: "/tmp/strom-qa-debug.log")
+        if let handle = try? FileHandle(forWritingTo: url) { handle.seekToEndOfFile(); handle.write(Data(line.utf8)); try? handle.close() } else { try? Data(line.utf8).write(to: url) }
+        #endif
+    }
+    /// Address of the update announcement (read-only, no data about the user is sent).
+    var updateEndpoint: URL? { serviceURL?.appendingPathComponent("v1").appendingPathComponent("update") }
     func deactivate() async {
         guard !busy else{return};error="";busy=true;defer{busy=false};let store=storage
         do {

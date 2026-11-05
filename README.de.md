@@ -38,10 +38,33 @@ scripts/build.sh "$PWD/_out/STRÖM.app"
 Das Skript überschreibt nie eine vorhandene `.app` und signiert den Build nur ad hoc (nur für die lokale Nutzung).
 
 ## Datenschutz
-Keine Analyse- oder Tracking-Daten. Die App kontaktiert `strom.oskarreus.ch` nur zum Kauf, zur Aktivierung und zur Prüfung einer Plus-Lizenz.
+Kein Tracking, keine Werbung, keine Cookies. Die App kontaktiert `strom.oskarreus.ch`, um eine Plus-Lizenz zu kaufen, zu aktivieren und zu prüfen und um Ihre Zustimmung zu den Bedingungen festzuhalten. Optionale anonyme Nutzungsstatistik wird nur gesendet, wenn Sie zustimmen (standardmässig aus); sie lässt sich nicht mit Ihnen verknüpfen. Vollständiger Text weiter unten.
 
 ## Lizenz
 Der Quellcode steht unter der [PolyForm Noncommercial License 1.0.0](LICENSE): Du darfst ihn lesen, ändern und für private und nichtkommerzielle Zwecke nutzen. Verkauf, kostenpflichtige Forks oder kommerzielle Nutzung ohne Erlaubnis sind nicht gestattet. Siehe [NOTICE](NOTICE). Enthaltene Drittkomponenten (libtorrent-rasterbar, OpenSSL) behalten ihre eigenen Lizenzen: [resources/Licenses](resources/Licenses). Andere Bedingungen: info@oskarreus.ch.
 
 ## Support
 Fragen und Fehler: [Issues](../../issues) oder info@oskarreus.ch. Poste niemals Lizenzschlüssel in Issues.
+
+<!-- legal:start -->
+## Philosophie
+STRÖM ist ein leichter, schöner BitTorrent-Client für macOS. Wir glauben, ein Werkzeug sollte schnell, ruhig und einfach sein, Ihnen die Kontrolle lassen (Sie können das Teilen mit anderen abschalten) und Ihre Privatsphäre achten: kein verstecktes Tracking, keine Werbung, nichts wird verkauft.
+
+## Datenschutz und Statistik im Überblick
+- **Cookies.** Die STRÖM-App verwendet keine Cookies und keine Tracking-Technologien.
+- **Was Ihren Mac nie verlässt.** Ihre Torrent-Liste, Dateinamen, Magnet-Links, heruntergeladene Dateien, Einstellungen und die Peers, mit denen Sie sich verbinden, bleiben auf Ihrem Mac.
+- **Kauf- und Lizenzdaten.** Beim Kauf von Plus wickelt Stripe die Zahlung ab; Ihre Kartendaten sehen wir nie.
+- **Update-Prüfung.** Einmal täglich (und beim Klick auf „Jetzt prüfen“) fragt STRÖM unseren Server, ob eine neue Version existiert.
+- **Anonyme Nutzungsstatistik (optional).** Nur wenn Sie zustimmen, sendet STRÖM einmal täglich: Anzahl der Starts, aktive Nutzungszeit, Anzahl abgeschlossener Downloads, insgesamt heruntergeladene und hochgeladene Gigabyte, App-Version, macOS-Version und Oberflächensprache.
+- **Wie die Statistik geschützt ist.** Die Statistik nutzt eine zufällige Installationsnummer, die die App erzeugt.
+
+## Vollständiger Text
+- [Nutzungsbedingungen / Datenschutz, Cookies und Statistik](AGREEMENT.de.md)
+
+Rechtstexte:
+- [GDPR / DSGVO — Regulation (EU) 2016/679](https://eur-lex.europa.eu/eli/reg/2016/679/oj)
+- [Swiss Federal Act on Data Protection (FADP / nDSG), SR 235.1](https://www.fedlex.admin.ch/eli/cc/2022/491/en)
+- [Swiss Copyright Act (URG / CopA), SR 231.1](https://www.fedlex.admin.ch/eli/cc/1993/1798_1798_1798/en)
+- [PolyForm Noncommercial License 1.0.0](https://polyformproject.org/licenses/noncommercial/1.0.0)
+- [Stripe Privacy Policy (payment page)](https://stripe.com/privacy)
+<!-- legal:end -->

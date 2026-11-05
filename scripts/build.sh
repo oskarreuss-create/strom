@@ -7,7 +7,10 @@ root="$(cd "$(dirname "$0")/.." && pwd)"
 target="${1:?absolute .app path}"
 case "$target" in /*.app) ;; *) echo 'Expected an absolute .app path' >&2; exit 2;; esac
 [ -e "$target" ] && { echo 'Target exists; refusing to overwrite.' >&2; exit 3; }
-: "${LIBTORRENT_INCLUDE:?}" "${LIBTORRENT_LIB:?}"
+# Defaults: the vendored copy (private repository). The public repository has none, so set both variables there.
+[ -n "${LIBTORRENT_INCLUDE:-}" ] || { [ -d "$root/vendor/libtorrent/include" ] && LIBTORRENT_INCLUDE="$root/vendor/libtorrent/include"; }
+[ -n "${LIBTORRENT_LIB:-}" ] || { [ -d "$root/vendor/libtorrent/lib" ] && LIBTORRENT_LIB="$root/vendor/libtorrent/lib"; }
+: "${LIBTORRENT_INCLUDE:?set LIBTORRENT_INCLUDE (libtorrent 2.0.15 headers)}" "${LIBTORRENT_LIB:?set LIBTORRENT_LIB (folder with libtorrent-rasterbar.2.0.15.dylib)}"
 OPENSSL_LIB="${OPENSSL_LIB:-/opt/homebrew/opt/openssl@3/lib}"
 b="$(mktemp -d "${TMPDIR:-/tmp}/strom-build.XXXXXX")"; app="$b/STRÖM.app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources/Licenses" "$app/Contents/Frameworks"
