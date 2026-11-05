@@ -2,7 +2,6 @@ import Foundation
 import AppKit
 import CryptoKit
 import Security
-import LocalAuthentication
 
 private enum LicenseFailure: Error { case storage, invalidToken, unconfigured, network, remote(String) }
 private struct LicenseSaved: Codable, Sendable { let key: String; let token: String }
@@ -13,40 +12,19 @@ private struct LicenseStorage: Sendable {
     let service: String
     // The device key and the activation live in a private file (only this user can read it), not in the Keychain:
     // a program without a paid Apple signature gets a password prompt from the Keychain on every new version.
-    // Older versions kept them in the Keychain; they are moved over once (and never asked about again).
+    // The Keychain is never touched (not even to look), so macOS can never show a password prompt for it.
+    // Older versions kept the key there; that old copy is simply not used, the license is activated again with the key.
     private var directory: URL {
         FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("STRÖM", isDirectory: true).appendingPathComponent(service, isDirectory: true)
     }
     private func file(_ account: String) -> URL { directory.appendingPathComponent(account) }
-    private func marker(_ account: String) -> URL { directory.appendingPathComponent(account + ".migrated") }
     private func prepare() throws {
         do { try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700]) }
         catch { throw LicenseFailure.storage }
     }
-    private func mark(_ account: String) { try? prepare(); try? Data().write(to: marker(account)) }
-    private func legacyQuery(_ account: String) -> [String: Any] {
-        [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: account]
-    }
-    /// Asking only whether an old Keychain entry exists never shows a prompt.
-    private func legacyExists(_ account: String) -> Bool {
-        var q = legacyQuery(account); q[kSecReturnAttributes as String] = true; q[kSecMatchLimit as String] = kSecMatchLimitOne
-        let status = SecItemCopyMatching(q as CFDictionary, nil)
-        return status == errSecSuccess || status == errSecInteractionNotAllowed
-    }
-    private func legacyRead(_ account: String) -> Data? {
-        var q = legacyQuery(account); q[kSecReturnData as String] = true; q[kSecMatchLimit as String] = kSecMatchLimitOne
-        var result: CFTypeRef?
-        guard SecItemCopyMatching(q as CFDictionary, &result) == errSecSuccess else { return nil }
-        return result as? Data
-    }
     func read(_ account: String) throws -> Data? {
-        if let data = try? Data(contentsOf: file(account)) { return data }
-        if FileManager.default.fileExists(atPath: marker(account).path) { return nil }
-        guard legacyExists(account) else { return nil }
-        guard let data = legacyRead(account) else { mark(account); return nil }   // refused: do not ask again
-        try write(data, account: account)
-        return data
+        try? Data(contentsOf: file(account))
     }
     func write(_ data: Data, account: String) throws {
         try prepare()
@@ -54,13 +32,11 @@ private struct LicenseStorage: Sendable {
             try data.write(to: file(account), options: .atomic)
             try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file(account).path)
         } catch { throw LicenseFailure.storage }
-        mark(account)
     }
     func delete(_ account: String) throws {
         if FileManager.default.fileExists(atPath: file(account).path) {
             do { try FileManager.default.removeItem(at: file(account)) } catch { throw LicenseFailure.storage }
         }
-        mark(account)
     }
     func identity(create: Bool) throws -> Curve25519.Signing.PrivateKey {
         if let data=try read("device-key") { return try Curve25519.Signing.PrivateKey(rawRepresentation:data) }
