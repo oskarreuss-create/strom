@@ -9,6 +9,7 @@
 ## Features
 - Free, with no time limit: torrent files and magnet links, pause, sorting, compact mode, notifications, and the option to disable sharing.
 - Interface in 6 languages: English (default), Deutsch, Français, Italiano, Русский, Español.
+- **Watch while downloading:** the play button on a torrent opens the video in [BÜHNE](https://github.com/oskarreuss-create/buehne), our free native player (separate download; STRÖM links to it). You cannot jump past the part that has already been downloaded.
 - **Plus** — a one-time payment of $7 for one device; works offline after activation. Extra conveniences, such as keeping the Mac awake during downloads and removing the .torrent file after completion.
 - **Discount codes:** if you have one, enter it in the same field as the license key — you will be taken to a checkout page with the discount applied.
 

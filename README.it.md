@@ -9,6 +9,7 @@
 ## Funzionalità
 - Gratuito e senza limiti di tempo: file torrent e link magnet, pausa, ordinamento, modalità compatta, notifiche e possibilità di disattivare la condivisione.
 - Interfaccia in 6 lingue: English (predefinita), Deutsch, Français, Italiano, Русский, Español.
+- **Guardare durante il download:** il pulsante play su un torrent apre il video in [BÜHNE](https://github.com/oskarreuss-create/buehne), il nostro lettore nativo gratuito (download separato; STRÖM ne mostra il link). Non si può saltare oltre la parte già scaricata.
 - **Plus** — pagamento unico di 7 $ per un dispositivo; funziona offline dopo l'attivazione. Comodità extra, come tenere il Mac attivo durante i download e rimuovere il file .torrent al termine.
 - **Codici sconto:** se ne hai uno, inseriscilo nello stesso campo della chiave di licenza; verrai portato a una pagina di pagamento con lo sconto applicato.
 

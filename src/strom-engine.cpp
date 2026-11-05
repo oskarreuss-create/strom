@@ -214,6 +214,89 @@ void strom_priority(void* p, int id, int priority) {
     if (id<0 || id>=int(e->handles.size()) || !e->handles[id].is_valid()) return;
     e->priorities[id] = std::clamp(priority, 1, 5); e->reorder();
 }
+// ---- Watching while downloading ----
+// The player reads the file through a small local server inside STRÖM. These calls tell the engine which part of a
+// file is needed next and report how many bytes are already on disk in one piece (so the server never hands out holes).
+static char* copy_string(std::string const& text) {
+    char* copy = static_cast<char*>(std::malloc(text.size() + 1));
+    if (copy) std::memcpy(copy, text.c_str(), text.size() + 1);
+    return copy;
+}
+// JSON list of the torrent's files: [{"index":0,"path":"dir/file.mkv","size":123,"offset":0}]. "[]" until metadata is known.
+char* strom_files(void* p, int id) {
+    if (!p) return nullptr;
+    try {
+        auto* e=static_cast<Engine*>(p); std::lock_guard<std::mutex> lock(e->mutex);
+        if (id<0 || id>=int(e->handles.size()) || !e->handles[id].is_valid()) return nullptr;
+        auto ti = e->handles[id].torrent_file();
+        std::ostringstream out; out << '[';
+        if (ti) {
+            auto const& fs = ti->files();
+            for (int i=0; i<fs.num_files(); ++i) {
+                auto idx = lt::file_index_t(i); if (i) out << ',';
+                out << "{\"index\":" << i << ",\"path\":" << json_quote(fs.file_path(idx)) << ",\"size\":" << fs.file_size(idx) << ",\"offset\":" << fs.file_offset(idx) << "}";
+            }
+        }
+        out << ']'; return copy_string(out.str());
+    } catch (...) { return nullptr; }
+}
+// Number of bytes, starting at `start` inside file `file`, that are already downloaded without a gap.
+long long strom_contiguous(void* p, int id, int file, long long start) {
+    if (!p) return 0;
+    try {
+        auto* e=static_cast<Engine*>(p); std::lock_guard<std::mutex> lock(e->mutex);
+        if (id<0 || id>=int(e->handles.size()) || !e->handles[id].is_valid()) return 0;
+        auto& h = e->handles[id]; auto ti = h.torrent_file(); if (!ti) return 0;
+        auto const& fs = ti->files(); if (file<0 || file>=fs.num_files()) return 0;
+        auto idx = lt::file_index_t(file); long long size = fs.file_size(idx);
+        if (start<0 || start>=size) return 0;
+        auto st = h.status(lt::torrent_handle::query_pieces);
+        if (st.is_seeding || (st.is_finished && st.pieces.empty())) return size - start;
+        long long pos = start;
+        while (pos < size) {
+            lt::peer_request r = ti->map_file(idx, pos, 1);
+            if (r.piece < lt::piece_index_t(0) || int(r.piece) >= st.pieces.size() || !st.pieces.get_bit(r.piece)) break;
+            pos += ti->piece_size(r.piece) - r.start;
+        }
+        return std::min(pos, size) - start;
+    } catch (...) { return 0; }
+}
+// Switches a torrent to "in order" mode and puts the chosen file first. Returns 1 when metadata is known.
+int strom_stream_prepare(void* p, int id, int file) {
+    if (!p) return 0;
+    try {
+        auto* e=static_cast<Engine*>(p); std::lock_guard<std::mutex> lock(e->mutex);
+        if (id<0 || id>=int(e->handles.size()) || !e->handles[id].is_valid()) return 0;
+        auto& h = e->handles[id]; auto ti = h.torrent_file(); if (!ti) return 0;
+        if (file<0 || file>=ti->files().num_files()) return 0;
+        h.set_flags(lt::torrent_flags::sequential_download);
+        h.file_priority(lt::file_index_t(file), lt::top_priority);
+        return 1;
+    } catch (...) { return 0; }
+}
+// Asks for the pieces covering [offset, offset+bytes) of the file to be fetched next, nearest first.
+int strom_stream_window(void* p, int id, int file, long long offset, long long bytes) {
+    if (!p || bytes <= 0) return 0;
+    try {
+        auto* e=static_cast<Engine*>(p); std::lock_guard<std::mutex> lock(e->mutex);
+        if (id<0 || id>=int(e->handles.size()) || !e->handles[id].is_valid()) return 0;
+        auto& h = e->handles[id]; auto ti = h.torrent_file(); if (!ti) return 0;
+        auto const& fs = ti->files(); if (file<0 || file>=fs.num_files()) return 0;
+        auto idx = lt::file_index_t(file); long long size = fs.file_size(idx);
+        long long pos = std::max<long long>(0, offset), end = std::min(size, offset + bytes); int rank = 0, count = 0;
+        while (pos < end) {
+            lt::peer_request r = ti->map_file(idx, pos, 1);
+            if (!h.have_piece(r.piece)) { h.set_piece_deadline(r.piece, 150 * (++rank), {}); ++count; }
+            pos += ti->piece_size(r.piece) - r.start;
+        }
+        return count;
+    } catch (...) { return 0; }
+}
+void strom_stream_stop(void* p, int id) {
+    if (!p) return; auto* e=static_cast<Engine*>(p); std::lock_guard<std::mutex> lock(e->mutex);
+    if (id<0 || id>=int(e->handles.size()) || !e->handles[id].is_valid()) return;
+    e->handles[id].unset_flags(lt::torrent_flags::sequential_download); e->handles[id].clear_piece_deadlines();
+}
 #ifdef STROM_TESTING
 int strom_test_restored(void* p, int id) { auto* e=static_cast<Engine*>(p); return e->restored.at(id) ? 1 : 0; }
 int strom_test_port(void* p) { return static_cast<Engine*>(p)->session.listen_port(); }

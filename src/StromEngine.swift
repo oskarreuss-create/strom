@@ -14,6 +14,13 @@ import Combine
 @_silgen_name("strom_checkpoint") private func engineCheckpoint(_ p: UnsafeMutableRawPointer?, _ wait: Int32)
 @_silgen_name("strom_snapshot") private func engineSnapshot(_ p: UnsafeMutableRawPointer?) -> UnsafeMutablePointer<CChar>?
 @_silgen_name("strom_free") private func engineFree(_ s: UnsafeMutablePointer<CChar>?)
+@_silgen_name("strom_files") private func engineFiles(_ p: UnsafeMutableRawPointer?, _ id: Int32) -> UnsafeMutablePointer<CChar>?
+@_silgen_name("strom_contiguous") private func engineContiguous(_ p: UnsafeMutableRawPointer?, _ id: Int32, _ file: Int32, _ start: Int64) -> Int64
+@_silgen_name("strom_stream_prepare") private func engineStreamPrepare(_ p: UnsafeMutableRawPointer?, _ id: Int32, _ file: Int32) -> Int32
+@_silgen_name("strom_stream_window") private func engineStreamWindow(_ p: UnsafeMutableRawPointer?, _ id: Int32, _ file: Int32, _ offset: Int64, _ bytes: Int64) -> Int32
+@_silgen_name("strom_stream_stop") private func engineStreamStop(_ p: UnsafeMutableRawPointer?, _ id: Int32)
+struct StreamFile: Decodable, Sendable { let index: Int; let path: String; let size: Int64; let offset: Int64 }
+private struct EngineHandleBox: @unchecked Sendable { let value: UnsafeMutableRawPointer? }
 
 struct TorrentItem: Codable, Identifiable {
     var id: Int32; var name: String; var progress: Double; var size: Int64; var done: Int64
@@ -229,4 +236,21 @@ struct SavedTorrent: Codable {
     }
     func report(_ message: String, detail: String = "") { errorMessage = message; errorDetail = detail; showError = true }
     func flush() { refresh(recordStatistics: true); persist(); engineCheckpoint(handle, 1); didFlush = true }
+}
+
+// ---- Watching while downloading (used by StromWatch) ----
+extension StromEngine {
+    func streamFiles(_ item: TorrentItem) -> [StreamFile] {
+        guard handle != nil, let raw = engineFiles(handle, item.id) else { return [] }
+        defer { engineFree(raw) }
+        return (try? JSONDecoder().decode([StreamFile].self, from: Data(String(cString: raw).utf8))) ?? []
+    }
+    func streamPrepare(_ item: TorrentItem, file: Int) -> Bool { handle != nil && engineStreamPrepare(handle, item.id, Int32(file)) == 1 }
+    func streamWindow(_ item: TorrentItem, file: Int, offset: Int64, bytes: Int64) { if handle != nil { _ = engineStreamWindow(handle, item.id, Int32(file), offset, bytes) } }
+    func streamStop(_ item: TorrentItem) { if handle != nil { engineStreamStop(handle, item.id) } }
+    /// Gap-free bytes from `start`; safe from any thread because the engine serialises access itself.
+    func streamContiguousProvider(_ item: TorrentItem, file: Int) -> @Sendable (Int64) -> Int64 {
+        let box = EngineHandleBox(value: handle), id = Int32(item.id), index = Int32(file)
+        return { start in engineContiguous(box.value, id, index, start) }
+    }
 }

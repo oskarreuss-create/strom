@@ -17,13 +17,14 @@ mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources/Licenses" "$app/Contents
 swift_files=("$root"/src/*.swift)
 main_files=(); for f in "${swift_files[@]}"; do [ "$(basename "$f")" = StromSleepWatchdog.swift ] || main_files+=("$f"); done
 c++ -std=c++17 -c -I"$LIBTORRENT_INCLUDE" -I/opt/homebrew/include "$root/src/strom-engine.cpp" -o "$b/engine.o"
-# STROM_SWIFT_FLAGS is for the sandbox QA build only (e.g. -DSTROM_LICENSE_TESTING).
-swiftc ${STROM_SWIFT_FLAGS:-} -parse-as-library "${main_files[@]}" "$b/engine.o" -L"$LIBTORRENT_LIB" -ltorrent-rasterbar -lc++ \
+# STROM_SWIFT_FLAGS is for the sandbox QA build only (e.g. -DSTROM_LICENSE_TESTING). By default the video player integration is on.
+swiftc ${STROM_SWIFT_FLAGS--DSTROM_VIDEO_PREVIEW} -parse-as-library "${main_files[@]}" "$b/engine.o" -L"$LIBTORRENT_LIB" -ltorrent-rasterbar -lc++ \
   -Xlinker -rpath -Xlinker @executable_path/../Frameworks -o "$app/Contents/MacOS/Strom"
 swiftc "$root/src/StromSleepWatchdog.swift" -o "$app/Contents/MacOS/StromSleepWatchdog"
 cp "$root/resources/Info.plist" "$app/Contents/Info.plist"
 cp "$root/resources/AppIcon.icns" "$app/Contents/Resources/AppIcon.icns"
 cp "$root/resources/StromLogo.png" "$app/Contents/Resources/StromLogo.png"
+[ -f "$root/resources/PlayerGlyph.png" ] && cp "$root/resources/PlayerGlyph.png" "$app/Contents/Resources/PlayerGlyph.png"
 [ -d "$root/resources/Licenses" ] && cp "$root"/resources/Licenses/* "$app/Contents/Resources/Licenses/"
 cp "$LIBTORRENT_LIB/libtorrent-rasterbar.2.0.15.dylib" "$app/Contents/Frameworks/libtorrent-rasterbar.2.0.dylib"
 cp -L "$OPENSSL_LIB/libssl.3.dylib" "$OPENSSL_LIB/libcrypto.3.dylib" "$app/Contents/Frameworks/"

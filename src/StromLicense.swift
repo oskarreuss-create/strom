@@ -11,27 +11,56 @@ private struct LicenseReply: Codable { let license: String?; let deactivated: Bo
 private struct CheckoutReply: Decodable { let url: String?; let error: String? }
 private struct LicenseStorage: Sendable {
     let service: String
-    private func query(_ account: String) -> [String: Any] {
-        let context = LAContext(); context.interactionNotAllowed = true
-        return [kSecClass as String:kSecClassGenericPassword,kSecAttrService as String:service,kSecAttrAccount as String:account,kSecUseAuthenticationContext as String:context]
+    // The device key and the activation live in a private file (only this user can read it), not in the Keychain:
+    // a program without a paid Apple signature gets a password prompt from the Keychain on every new version.
+    // Older versions kept them in the Keychain; they are moved over once (and never asked about again).
+    private var directory: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("STRÖM", isDirectory: true).appendingPathComponent(service, isDirectory: true)
+    }
+    private func file(_ account: String) -> URL { directory.appendingPathComponent(account) }
+    private func marker(_ account: String) -> URL { directory.appendingPathComponent(account + ".migrated") }
+    private func prepare() throws {
+        do { try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700]) }
+        catch { throw LicenseFailure.storage }
+    }
+    private func mark(_ account: String) { try? prepare(); try? Data().write(to: marker(account)) }
+    private func legacyQuery(_ account: String) -> [String: Any] {
+        [kSecClass as String: kSecClassGenericPassword, kSecAttrService as String: service, kSecAttrAccount as String: account]
+    }
+    /// Asking only whether an old Keychain entry exists never shows a prompt.
+    private func legacyExists(_ account: String) -> Bool {
+        var q = legacyQuery(account); q[kSecReturnAttributes as String] = true; q[kSecMatchLimit as String] = kSecMatchLimitOne
+        let status = SecItemCopyMatching(q as CFDictionary, nil)
+        return status == errSecSuccess || status == errSecInteractionNotAllowed
+    }
+    private func legacyRead(_ account: String) -> Data? {
+        var q = legacyQuery(account); q[kSecReturnData as String] = true; q[kSecMatchLimit as String] = kSecMatchLimitOne
+        var result: CFTypeRef?
+        guard SecItemCopyMatching(q as CFDictionary, &result) == errSecSuccess else { return nil }
+        return result as? Data
     }
     func read(_ account: String) throws -> Data? {
-        var q=query(account);q[kSecReturnData as String]=true;q[kSecMatchLimit as String]=kSecMatchLimitOne
-        var result: CFTypeRef?;let status=SecItemCopyMatching(q as CFDictionary,&result)
-        if status==errSecItemNotFound { return nil }
-        guard status==errSecSuccess,let data=result as? Data else { throw LicenseFailure.storage };return data
+        if let data = try? Data(contentsOf: file(account)) { return data }
+        if FileManager.default.fileExists(atPath: marker(account).path) { return nil }
+        guard legacyExists(account) else { return nil }
+        guard let data = legacyRead(account) else { mark(account); return nil }   // refused: do not ask again
+        try write(data, account: account)
+        return data
     }
     func write(_ data: Data, account: String) throws {
-        let q=query(account), attributes:[String:Any]=[kSecValueData as String:data]
-        let status=SecItemUpdate(q as CFDictionary,attributes as CFDictionary)
-        if status==errSecItemNotFound {
-            var add=q;add[kSecValueData as String]=data;add[kSecAttrAccessible as String]=kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-            guard SecItemAdd(add as CFDictionary,nil)==errSecSuccess else { throw LicenseFailure.storage }
-        } else if status != errSecSuccess { throw LicenseFailure.storage }
+        try prepare()
+        do {
+            try data.write(to: file(account), options: .atomic)
+            try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: file(account).path)
+        } catch { throw LicenseFailure.storage }
+        mark(account)
     }
     func delete(_ account: String) throws {
-        let status=SecItemDelete(query(account) as CFDictionary)
-        guard status==errSecSuccess || status==errSecItemNotFound else { throw LicenseFailure.storage }
+        if FileManager.default.fileExists(atPath: file(account).path) {
+            do { try FileManager.default.removeItem(at: file(account)) } catch { throw LicenseFailure.storage }
+        }
+        mark(account)
     }
     func identity(create: Bool) throws -> Curve25519.Signing.PrivateKey {
         if let data=try read("device-key") { return try Curve25519.Signing.PrivateKey(rawRepresentation:data) }

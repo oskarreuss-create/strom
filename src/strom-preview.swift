@@ -316,8 +316,11 @@ struct PreviewWindow: View {
     @AppStorage("consentSentVersion") private var consentSent = ""
     @AppStorage("statsEnabled") private var statsEnabled = false
     @State private var agreementStep = 0
+    @State private var agreementTick = false
     @State private var agreementReview = false
     @State private var consentBusy = false
+    @State private var showPlayerMissing = false
+    @StateObject private var watcher = StromWatch()
     @StateObject private var update = StromUpdate()
     @AppStorage("updateCheckEnabled") private var updateCheckEnabled = true
     @AppStorage("updateDismissedVersion") private var updateDismissed = ""
@@ -412,17 +415,24 @@ struct PreviewWindow: View {
                         Button(t("Открыть Plus")) { licenseInput = ""; showLicense = true }.buttonStyle(.plain).font(.custom("Helvetica", size: 11)).padding(.top, 3)
                     }.padding(.bottom, 12)
                 }
-                HStack(spacing: 8) {
+                HStack(spacing: 0) {
                     Button { showSettings = true } label: { Image(systemName: "gearshape").font(.system(size: 18)).frame(width: 38, height: 38) }
                         .buttonStyle(.glass).buttonBorderShape(.circle).help(t("Настройки")).accessibilityLabel(t("Настройки"))
+                    Spacer(minLength: 4)
                     Button { compact = true } label: { Image(systemName: "arrow.down.right.and.arrow.up.left").font(.system(size: 16)).frame(width: 38, height: 38) }
                         .buttonStyle(.glass).buttonBorderShape(.circle).help(t("Миниатюра")).accessibilityLabel(t("Миниатюра"))
+                    Spacer(minLength: 4)
                     VStack(alignment: .leading, spacing: 2) {
                         Toggle(isOn: plusBinding($preventSleepDuringDownloads)) { Image(systemName: "moon.zzz").font(.system(size: 11)).frame(width: 15) }
                             .toggleStyle(.switch).controlSize(.mini).frame(height: 18).help(t("Не переводить Mac в сон во время загрузок")).accessibilityLabel(t("Не переводить Mac в сон во время загрузок"))
                         Toggle(isOn: plusBinding($preventSleepWithLidClosed)) { Image(systemName: "laptopcomputer").font(.system(size: 11)).frame(width: 15) }
                             .toggleStyle(.switch).controlSize(.mini).frame(height: 18).help(t("Не засыпать с закрытой крышкой во время загрузок")).accessibilityLabel(t("Не засыпать с закрытой крышкой во время загрузок"))
                     }.frame(height: 38)
+                    #if STROM_VIDEO_PREVIEW
+                    Spacer(minLength: 4)
+                    Button { openPlayer() } label: { playerMiniature(22).frame(width: 38, height: 38) }
+                        .buttonStyle(.glass).buttonBorderShape(.circle).help(t("Смотреть")).accessibilityLabel(t("Смотреть"))
+                    #endif
                 }
             }.frame(width: 225).padding(22).background(sidebarSurface.opacity(interfaceOpacity), in: RoundedRectangle(cornerRadius: 24)).glassEffect(.regular, in: .rect(cornerRadius: 24))
             .mask {
@@ -664,8 +674,12 @@ struct PreviewWindow: View {
         }
         .animation(.easeInOut(duration: 0.2), value: showLicense)
         .onChange(of: showLicense) { _, shown in if !shown { discountStarted = false } }
-        .overlay(alignment: .top) { updateBanner }
+        .overlay(alignment: .top) { VStack(spacing: 8) { updateBanner; watchBanner } }
         .overlay { if agreementStep != 0 { agreementWindow } }
+        .alert(t("Плеер BÜHNE не установлен"), isPresented: $showPlayerMissing) {
+            Button(t("Скачать плеер")) { NSWorkspace.shared.open(Self.playerDownloadURL) }
+            Button(t("Отмена"), role: .cancel) {}
+        } message: { Text(t("Плеер бесплатный. Откроется страница загрузки на GitHub.")) }
         .onExitCommand { if agreementStep != 0 { if agreementReview { agreementStep = 0; agreementReview = false } } else if showLicense { showLicense = false } else if compact { compact = false } else { selected = nil; showSettings = false } }
         .alert(t("Magnet-ссылка"), isPresented: $showMagnet) {
             TextField("magnet:…", text: $magnet)
@@ -713,6 +727,13 @@ struct PreviewWindow: View {
         }
     }
     /// Two windows in a row on first launch: 1) terms and information, 2) privacy, cookies and statistics.
+    private static let tickText = [
+        "en": "I have read and accept the terms of use",
+        "de": "Ich habe die Nutzungsbedingungen gelesen und akzeptiere sie",
+        "fr": "J’ai lu et j’accepte les conditions d’utilisation",
+        "it": "Ho letto e accetto le condizioni d’uso",
+        "ru": "Я прочитал(а) условия использования и принимаю их",
+        "es": "He leído y acepto las condiciones de uso"]
     private var agreementWindow: some View {
         let pack = agreementPacks[language] ?? agreementPacks["en"]!
         let sections = agreementStep == 1 ? pack.terms : pack.privacy
@@ -753,7 +774,8 @@ struct PreviewWindow: View {
                 } else if agreementStep == 1 {
                     Button(pack.decline, role: .destructive) { NSApplication.shared.terminate(nil) }.buttonStyle(.bordered)
                     Spacer()
-                    Button(pack.accept) { agreementStep = 2 }.buttonStyle(.borderedProminent)
+                    Toggle(Self.tickText[language] ?? Self.tickText["en"]!, isOn: $agreementTick).toggleStyle(.checkbox).font(.custom("Helvetica-Light", size: 12))
+                    Button(pack.accept) { agreementStep = 2 }.buttonStyle(.borderedProminent).disabled(!agreementTick)
                 } else {
                     Button(pack.statsNo) { finishAgreement(stats: false) }.buttonStyle(.bordered)
                     Spacer()
@@ -857,6 +879,7 @@ struct PreviewWindow: View {
                 }.contentShape(Rectangle())
             }.buttonStyle(.plain).frame(maxWidth: .infinity, alignment: .leading).accessibilityLabel(item.name.isEmpty ? t("Поиск информации…") : item.name).accessibilityHint(t("Статистика"))
             if !engine.sharingAllowed(item) { sharingLock }
+            playButton(item)
             Button { deleteCandidate = item } label: { Image(systemName: "trash") }.buttonStyle(.borderless).help(t("Удалить"))
         }.font(.custom("Helvetica-Light", size: 12)).padding(14).background((isLight ? Color.black : Color.white).opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
     }
@@ -867,6 +890,7 @@ struct PreviewWindow: View {
                 Spacer()
                 Text("\(Int(item.progress * 100))%").monospacedDigit()
                 if !engine.sharingAllowed(item) { sharingLock }
+                playButton(item)
                 Button { engine.pause(item) } label: { Image(systemName: (engine.records[item.id]?.paused ?? false) ? "play.fill" : "pause.fill") }.buttonStyle(.borderless).help(t((engine.records[item.id]?.paused ?? false) ? "Продолжить" : "Приостановить"))
                 if engine.records[item.id]?.stopped == true { Button { deleteCandidate = item } label: { Image(systemName: "trash") }.buttonStyle(.borderless).help(t("Удалить")) }
                 else { Button { engine.stop(item) } label: { Image(systemName: "stop.fill") }.buttonStyle(.borderless).help(t("Остановить")) }
@@ -916,6 +940,70 @@ struct PreviewWindow: View {
             .lineLimit(2).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
             .overlay { TitleClickSurface(openDetails: { selected = item }, reveal: { reveal(item) }).accessibilityHidden(true) }
             .accessibilityAddTraits(.isButton).accessibilityAction { selected = item }
+    }
+    // ---- Video player (BÜHNE): a separate, free app; STRÖM only launches it ----
+    private static let playerBundleID = "ch.oskarreus.buehne"
+    private static let playerDownloadURL = URL(string: "https://github.com/oskarreuss-create/buehne/releases/latest")!
+    private static let playerIconImage: NSImage? = {
+        // One-colour glyph: it is tinted like the other icons, so it never stands out with colour.
+        guard let image = Bundle.main.url(forResource: "PlayerGlyph", withExtension: "png").flatMap({ NSImage(contentsOf: $0) }) else { return nil }
+        image.isTemplate = true; return image
+    }()
+    private func playerMiniature(_ size: CGFloat) -> some View {
+        Group {
+            if let icon = Self.playerIconImage { Image(nsImage: icon).renderingMode(.template).resizable().interpolation(.high).aspectRatio(contentMode: .fit).foregroundStyle(.primary) }
+            else { Image(systemName: "play.rectangle.fill").resizable().aspectRatio(contentMode: .fit) }
+        }.frame(width: size, height: size)
+    }
+    @ViewBuilder private func playButton(_ item: TorrentItem) -> some View {
+        #if STROM_VIDEO_PREVIEW
+        Button { watch(item) } label: { playerMiniature(15) }.buttonStyle(.borderless).help(t("Смотреть")).accessibilityLabel(t("Смотреть"))
+        #endif
+    }
+    private func playerApp() -> URL? { NSWorkspace.shared.urlForApplication(withBundleIdentifier: Self.playerBundleID) }
+    /// Launches the player if it is installed, otherwise offers the download page.
+    private func openPlayer() {
+        guard let app = playerApp() else { showPlayerMissing = true; return }
+        NSWorkspace.shared.openApplication(at: app, configuration: NSWorkspace.OpenConfiguration())
+    }
+    private func videoFile(for item: TorrentItem) -> URL? {
+        guard let folder = engine.records[item.id]?.directory, !item.name.isEmpty else { return nil }
+        let target = URL(fileURLWithPath: folder, isDirectory: true).appendingPathComponent(item.name)
+        let video: Set<String> = ["mp4", "m4v", "mov", "mkv", "avi", "webm", "ts", "mpg", "mpeg", "wmv", "flv"]
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: target.path, isDirectory: &isDirectory) else { return nil }
+        if !isDirectory.boolValue { return video.contains(target.pathExtension.lowercased()) ? target : nil }
+        let files = FileManager.default.enumerator(at: target, includingPropertiesForKeys: [.fileSizeKey], options: [.skipsHiddenFiles])?.compactMap { $0 as? URL } ?? []
+        return files.filter { video.contains($0.pathExtension.lowercased()) }
+            .max { ((try? $0.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0) < ((try? $1.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0) }
+    }
+    private func watch(_ item: TorrentItem) {
+        guard let app = playerApp() else { showPlayerMissing = true; return }
+        // Finished: open the file itself. Otherwise stream it while it downloads.
+        if item.complete, let file = videoFile(for: item) { NSWorkspace.shared.open([file], withApplicationAt: app, configuration: NSWorkspace.OpenConfiguration()); return }
+        if engine.records[item.id]?.paused == true { engine.pause(item) }   // a paused download is resumed to be watched
+        watcher.start(item, engine: engine) { url in
+            var parts = URLComponents(); parts.scheme = "buehne"; parts.host = "open"; parts.queryItems = [URLQueryItem(name: "path", value: url.absoluteString)]
+            if let link = parts.url, let app = NSWorkspace.shared.urlForApplication(withBundleIdentifier: Self.playerBundleID) {
+                NSWorkspace.shared.open([link], withApplicationAt: app, configuration: NSWorkspace.OpenConfiguration())
+            }
+        }
+    }
+    @ViewBuilder private var watchBanner: some View {
+        switch watcher.phase {
+        case .idle: EmptyView()
+        case .preparing(let ratio):
+            HStack(spacing: 12) {
+                ProgressView(value: ratio).frame(width: 90)
+                Text("\(t("Готовим просмотр")) \(Int(ratio * 100))%").font(.custom("Helvetica", size: 12))
+                Button(t("Отмена")) { watcher.cancel(engine: engine) }.buttonStyle(.bordered).controlSize(.small)
+            }.padding(.horizontal, 16).padding(.vertical, 9).background(.regularMaterial, in: Capsule()).glassEffect(.regular, in: .capsule).shadow(radius: 10).transition(.opacity)
+        case .failed(let reason):
+            HStack(spacing: 12) {
+                Text(t(reason == "novideo" ? "В торренте нет видеофайла." : "Не удалось подготовить просмотр.")).font(.custom("Helvetica", size: 12))
+                Button("OK") { watcher.dismissFailure() }.buttonStyle(.bordered).controlSize(.small)
+            }.padding(.horizontal, 16).padding(.vertical, 9).background(.regularMaterial, in: Capsule()).glassEffect(.regular, in: .capsule).shadow(radius: 10).transition(.opacity)
+        }
     }
     private func reveal(_ item: TorrentItem) {
         guard let folder = engine.records[item.id]?.directory else { return }
