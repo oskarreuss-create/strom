@@ -57,6 +57,18 @@ final class StromNotificationDelegate: NSObject, UNUserNotificationCenterDelegat
     let downloadStatusIndicator = DownloadStatusIndicator()
     @Published var pendingFiles: [URL] = []
     func application(_ application: NSApplication, open urls: [URL]) { pendingFiles.append(contentsOf: urls.filter(\.isFileURL)) }
+    func applicationDidFinishLaunching(_ notification: Notification) { ejectInstallerDisk() }
+    /// After the app was dragged into Applications and started from there, the installer disk image is no longer needed:
+    /// eject it so it does not stay on the desktop. Only the exact installer volume is touched (name STRÖM holding STRÖM.app and the Applications link).
+    private func ejectInstallerDisk() {
+        let path = Bundle.main.bundlePath
+        guard !path.hasPrefix("/Volumes/"), !path.contains("AppTranslocation") else { return }
+        let volume = URL(fileURLWithPath: "/Volumes/STRÖM", isDirectory: true)
+        let manager = FileManager.default
+        guard manager.fileExists(atPath: volume.appendingPathComponent("STRÖM.app").path),
+              manager.fileExists(atPath: volume.appendingPathComponent("Applications").path) else { return }
+        DispatchQueue.global(qos: .utility).async { try? NSWorkspace.shared.unmountAndEjectDevice(at: volume) }
+    }
 }
 
 struct ClearWindow: NSViewRepresentable {
@@ -313,10 +325,12 @@ struct PreviewWindow: View {
     @State private var discountStarted = false
     @StateObject private var usage = StromUsage()
     @AppStorage("agreementVersionAccepted") private var acceptedAgreement = ""
+    @AppStorage("desktopShortcutOffered") private var desktopShortcutOffered = false
     @AppStorage("consentSentVersion") private var consentSent = ""
     @AppStorage("statsEnabled") private var statsEnabled = false
     @State private var agreementStep = 0
     @State private var agreementTick = false
+    @State private var shortcutTick = true
     @State private var agreementReview = false
     @State private var consentBusy = false
     @State private var showPlayerMissing = false
@@ -332,6 +346,16 @@ struct PreviewWindow: View {
     @State private var selection = 0
     @State private var showNotice = false
     @State private var compact = false
+    @State private var miniDragStart: (mouse: NSPoint, origin: NSPoint)?
+    @State private var torrentDropTargeted = false
+    /// Moves the compact window with the pointer, measured on screen so the moving window cannot disturb the gesture.
+    private func moveWindowWithMouse() {
+        guard let window = NSApp.keyWindow ?? NSApp.mainWindow else { return }
+        let mouse = NSEvent.mouseLocation
+        if miniDragStart == nil { miniDragStart = (mouse, window.frame.origin) }
+        guard let start = miniDragStart else { return }
+        window.setFrameOrigin(NSPoint(x: start.origin.x + mouse.x - start.mouse.x, y: start.origin.y + mouse.y - start.mouse.y))
+    }
     @State private var showSettings = false
     @State private var showMagnet = false
     @State private var magnet = ""
@@ -386,7 +410,7 @@ struct PreviewWindow: View {
                           MiniDisk(item: item, language: language, light: isLight, expand: { compact = false }, formatBytes: speed, formatDuration: duration)
                       }
                   }
-              }.background(.regularMaterial, in: RoundedRectangle(cornerRadius: 24)).ignoresSafeArea()
+              }.background(.regularMaterial, in: RoundedRectangle(cornerRadius: 24)).contentShape(RoundedRectangle(cornerRadius: 24)).onTapGesture { compact = false }.gesture(DragGesture(minimumDistance: 3, coordinateSpace: .global).onChanged { _ in moveWindowWithMouse() }.onEnded { _ in miniDragStart = nil }).ignoresSafeArea()
           } else {
           HStack(spacing: 16) {
             VStack(alignment: .leading, spacing: 8) {
@@ -484,6 +508,25 @@ struct PreviewWindow: View {
           }.padding(18)
           }
         }.frame(minWidth: compact ? 0 : 780, minHeight: compact ? 0 : 500)
+        // The whole window can be dragged from any spot that is not itself a control (controls keep their own gestures).
+        .gesture(DragGesture(minimumDistance: 5, coordinateSpace: .global).onChanged { _ in moveWindowWithMouse() }.onEnded { _ in miniDragStart = nil }, including: compact ? .none : .gesture)
+        .onDrop(of: [UTType.fileURL], isTargeted: $torrentDropTargeted) { providers in
+            var accepted = false
+            for provider in providers where provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
+                accepted = true
+                provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
+                    var url: URL?
+                    if let data = item as? Data { url = URL(dataRepresentation: data, relativeTo: nil) } else if let direct = item as? URL { url = direct }
+                    guard let url, url.isFileURL else { return }
+                    DispatchQueue.main.async {
+                        if url.pathExtension.lowercased() == "torrent" { addTorrentURL(url) }
+                        else { engine.report("Не удалось добавить торрент.") }
+                    }
+                }
+            }
+            return accepted
+        }
+        .overlay { if torrentDropTargeted { RoundedRectangle(cornerRadius: 24).stroke(Color.primary.opacity(0.5), style: StrokeStyle(lineWidth: 2, dash: [8, 6])).padding(6).allowsHitTesting(false) } }
         .font(.custom("Helvetica-Light", size: 13))
         .tracking(0.15)
         .preferredColorScheme(theme == "auto" ? nil : theme == "light" ? .light : .dark)
@@ -500,6 +543,27 @@ struct PreviewWindow: View {
                     Button(t("Готово")) { showSettings = false }.keyboardShortcut(.defaultAction)
                 }
                 Divider()
+                #if STROM_VIDEO_PREVIEW
+                HStack(spacing: 14) {
+                    Group {
+                        if let icon = Self.playerAppIcon { Image(nsImage: icon).resizable().interpolation(.high) } else { Image(systemName: "play.rectangle.fill").resizable().aspectRatio(contentMode: .fit) }
+                    }.frame(width: 54, height: 54)
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("BÜHNE").font(.custom("Helvetica-Bold", size: 15))
+                        Text(t("Нативный плеер для просмотра видео во время загрузки")).font(.custom("Helvetica-Light", size: 12)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                    }.frame(maxWidth: .infinity, alignment: .leading)
+                    VStack(alignment: .trailing, spacing: 8) {
+                        Button { NSWorkspace.shared.open(Self.playerDownloadURL) } label: {
+                            HStack(spacing: 7) {
+                                if let mark = Self.gitHubMark { Image(nsImage: mark).renderingMode(.template).resizable().interpolation(.high).frame(width: 15, height: 15) }
+                                Text(t("Загрузить с GitHub"))
+                            }
+                        }
+                        Button(t("Открыть")) { openPlayer() }.disabled(playerApp() == nil)
+                    }.fixedSize()
+                }.padding(12).background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 16))
+                Divider()
+                #endif
                 HStack(alignment: .center, spacing: 12) {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(t("Раздача по умолчанию")).font(.custom("Helvetica", size: 14))
@@ -580,7 +644,7 @@ struct PreviewWindow: View {
           }
         }
         .onAppear {
-            if acceptedAgreement != agreementVersion { agreementStep = 1 } else if consentSent != agreementVersion { retryConsent() }
+            if acceptedAgreement != agreementVersion { agreementStep = desktopShortcutOffered ? 1 : 3 } else if consentSent != agreementVersion { retryConsent() }
             usage.noteLaunch()
             if updateCheckEnabled, acceptedAgreement == agreementVersion { Task { await update.check(endpoint: license.updateEndpoint, force: false) } }
             refreshEnginePlusAccess()
@@ -711,8 +775,23 @@ struct PreviewWindow: View {
             .transition(.opacity)
         }
     }
+    // ---- Desktop shortcut, offered once after the first-launch agreement (like an installer on Windows) ----
+    private func createDesktopShortcut() {
+        let desktop = FileManager.default.urls(for: .desktopDirectory, in: .userDomainMask)[0]
+        var target = desktop.appendingPathComponent("STRÖM"); var suffix = 2
+        while FileManager.default.fileExists(atPath: target.path) { target = desktop.appendingPathComponent("STRÖM \(suffix)"); suffix += 1 }
+        do {
+            let data = try Bundle.main.bundleURL.bookmarkData(options: .suitableForBookmarkFile)
+            try URL.writeBookmarkData(data, to: target)
+            let dark = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            if let icon = Bundle.main.url(forResource: dark ? "STROM-icon-glass" : "STROM-icon-dark", withExtension: "icns").flatMap({ NSImage(contentsOf: $0) }) {
+                _ = NSWorkspace.shared.setIcon(icon, forFile: target.path, options: [])
+            }
+        } catch { engine.report("Не удалось создать ярлык.", detail: error.localizedDescription) }
+    }
     private func finishAgreement(stats: Bool) {
         statsEnabled = stats; acceptedAgreement = agreementVersion; agreementStep = 0; agreementReview = false
+        if !desktopShortcutOffered { desktopShortcutOffered = true; if shortcutTick && canMakeDesktopShortcut { createDesktopShortcut() } }
         retryConsent()
     }
     /// One send at a time: two at once would race to create the device key.
@@ -734,7 +813,40 @@ struct PreviewWindow: View {
         "it": "Ho letto e accetto le condizioni d’uso",
         "ru": "Я прочитал(а) условия использования и принимаю их",
         "es": "He leído y acepto las condiciones de uso"]
-    private var agreementWindow: some View {
+    @ViewBuilder private var agreementWindow: some View {
+        if agreementStep == 3 { welcomeWindow } else { termsWindow }
+    }
+    private static let shortcutText = [
+        "en": "Place the STRÖM icon on the desktop",
+        "de": "STRÖM-Symbol auf dem Schreibtisch ablegen",
+        "fr": "Placer l’icône STRÖM sur le bureau",
+        "it": "Metti l’icona STRÖM sulla scrivania",
+        "ru": "Поместить значок STRÖM на рабочий стол",
+        "es": "Colocar el icono de STRÖM en el escritorio"]
+    /// A desktop shortcut only makes sense once the app sits in its final place (not on the disk image or in a translocated copy).
+    private var canMakeDesktopShortcut: Bool {
+        let path = Bundle.main.bundlePath
+        return !path.contains("AppTranslocation") && !path.hasPrefix("/Volumes/")
+    }
+    /// First window on first launch: only the language (and the shortcut choice). Terms follow in the next window.
+    private var welcomeWindow: some View {
+        let pack = agreementPacks[language] ?? agreementPacks["en"]!
+        return VStack(alignment: .leading, spacing: 18) {
+            Text("STRÖM").font(.custom("HelveticaNeue-Light", size: 34))
+            Divider().opacity(0.4)
+            Text(pack.language).font(.custom("Helvetica-Light", size: 13)).foregroundStyle(.secondary)
+            Picker("", selection: $language) { ForEach(agreementLanguages, id: \.code) { Text($0.name).tag($0.code) } }.labelsHidden().pickerStyle(.menu).fixedSize()
+            if canMakeDesktopShortcut {
+                Toggle(Self.shortcutText[language] ?? Self.shortcutText["en"]!, isOn: $shortcutTick).toggleStyle(.checkbox).font(.custom("Helvetica-Light", size: 12))
+            }
+            Divider().opacity(0.4)
+            HStack {
+                Spacer()
+                Button("→") { agreementStep = 1 }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
+            }
+        }
+    }
+    private var termsWindow: some View {
         let pack = agreementPacks[language] ?? agreementPacks["en"]!
         let sections = agreementStep == 1 ? pack.terms : pack.privacy
         return VStack(alignment: .leading, spacing: 14) {
@@ -944,6 +1056,8 @@ struct PreviewWindow: View {
     // ---- Video player (BÜHNE): a separate, free app; STRÖM only launches it ----
     private static let playerBundleID = "ch.oskarreus.buehne"
     private static let playerDownloadURL = URL(string: "https://github.com/oskarreuss-create/buehne/releases/latest")!
+    private static let gitHubMark: NSImage? = Bundle.main.url(forResource: "GitHubMark", withExtension: "png").flatMap { NSImage(contentsOf: $0) }
+    private static let playerAppIcon: NSImage? = Bundle.main.url(forResource: "PlayerIcon", withExtension: "png").flatMap { NSImage(contentsOf: $0) }
     private static let playerIconImage: NSImage? = {
         // One-colour glyph: it is tinted like the other icons, so it never stands out with colour.
         guard let image = Bundle.main.url(forResource: "PlayerGlyph", withExtension: "png").flatMap({ NSImage(contentsOf: $0) }) else { return nil }
@@ -957,7 +1071,7 @@ struct PreviewWindow: View {
     }
     @ViewBuilder private func playButton(_ item: TorrentItem) -> some View {
         #if STROM_VIDEO_PREVIEW
-        Button { watch(item) } label: { playerMiniature(15) }.buttonStyle(.borderless).help(t("Смотреть")).accessibilityLabel(t("Смотреть"))
+        Button { watch(item) } label: { RoundedPlay().fill(.primary).frame(width: 25, height: 25).frame(width: 34, height: 30).contentShape(Rectangle()) }.buttonStyle(.borderless).help(t("Смотреть")).accessibilityLabel(t("Смотреть"))
         #endif
     }
     private func playerApp() -> URL? { NSWorkspace.shared.urlForApplication(withBundleIdentifier: Self.playerBundleID) }
@@ -1022,9 +1136,9 @@ struct PreviewWindow: View {
                 Chart(points) { p in LineMark(x: .value("%", p.id), y: .value("speed", p.speed)).foregroundStyle(.blue) }
                     .chartXScale(domain: 0...100).chartYScale(domain: 0...maximum)
                     .chartXAxis { AxisMarks(values: [0, 25, 50, 75, 100]) { _ in AxisGridLine() } }
-                    .chartYAxis { AxisMarks(position: .leading, values: [0.0, maximum]) { value in AxisGridLine(); AxisValueLabel { if let n = value.as(Double.self) { Text("\(speed(Int64(n)))/s") } } } }
+                    .chartYAxis { AxisMarks(position: .leading, values: (0...6).map { maximum * Double($0) / 6 }) { value in AxisGridLine().foregroundStyle(.secondary.opacity(0.25)); AxisValueLabel { if let n = value.as(Double.self) { Text("\(speed(Int64(n)))/s").font(.custom("Helvetica-Light", size: 10)).foregroundStyle(.secondary) } } } }
                     .overlay { if points.isEmpty { Text(t("Нет данных для графика")).foregroundStyle(.secondary) } }
-                    .frame(height: 130)
+                    .frame(height: 160)
                 HStack { Text("0%"); Spacer(); Text("25%"); Spacer(); Text("50%"); Spacer(); Text("75%"); Spacer(); Text("100%") }
                     .font(.custom("Helvetica-Light", size: 10)).foregroundStyle(.secondary).padding(.leading, 55)
             }
@@ -1036,7 +1150,6 @@ struct PreviewWindow: View {
                 GridRow { Text(t("Дата добавления")); Text(addedDate(item)) }
             }.font(.custom("Helvetica-Light", size: 12))
             HStack {
-                Button((engine.records[item.id]?.paused ?? false) ? "▶" : "Ⅱ") { engine.pause(item) }.help(t((engine.records[item.id]?.paused ?? false) ? "Продолжить" : "Приостановить"))
                 Toggle(t("Раздача файлов"), isOn: Binding(get: { engine.sharingAllowed(item) }, set: { engine.setSharing($0, for: item) })).toggleStyle(.switch).controlSize(.small)
                 if item.complete || engine.records[item.id]?.stopped == true { Button(t("Удалить")) { selected = nil; deleteCandidate = item } }
                 else { Button(t("Остановить")) { engine.stop(item) } }
@@ -1045,7 +1158,7 @@ struct PreviewWindow: View {
         }.font(.custom("Helvetica-Light", size: 13)).padding(28).frame(width: 620)
     }
     private var sharingLock: some View {
-        HStack(spacing: 1) { Image(systemName: "arrow.up.right"); Image(systemName: "lock.fill").font(.system(size: 8)) }.foregroundStyle(.secondary).help(t("Раздача выключена"))
+        NoUploadMark().frame(width: 15, height: 15).foregroundStyle(.secondary).help(t("Раздача выключена"))
     }
     private func speed(_ n: Int64) -> String {
         let units: [String] = language == "ru" ? ["Б", "КБ", "МБ", "ГБ", "ТБ"] : language == "fr" ? ["o", "Ko", "Mo", "Go", "To"] : ["B", "KB", "MB", "GB", "TB"]
@@ -1129,4 +1242,40 @@ struct PreviewWindow: View {
 @main struct StromApp: App {
     @NSApplicationDelegateAdaptor(StromAppDelegate.self) private var appDelegate
     var body: some Scene { Window("STRÖM", id: "main") { PreviewWindow(appDelegate: appDelegate) }.windowStyle(.hiddenTitleBar) }
+}
+
+
+/// Bold rounded play triangle, like the play mark of the BÜHNE logo: easy to see in a download row.
+struct RoundedPlay: Shape {
+    func path(in rect: CGRect) -> Path {
+        let r = min(rect.width, rect.height) * 0.14
+        let a = CGPoint(x: rect.minX + rect.width * 0.14, y: rect.minY + rect.height * 0.08)
+        let b = CGPoint(x: rect.maxX - rect.width * 0.04, y: rect.midY)
+        let c = CGPoint(x: rect.minX + rect.width * 0.14, y: rect.maxY - rect.height * 0.08)
+        var p = Path()
+        p.move(to: CGPoint(x: (a.x + b.x) / 2, y: (a.y + b.y) / 2))
+        p.addArc(tangent1End: b, tangent2End: c, radius: r)
+        p.addArc(tangent1End: c, tangent2End: a, radius: r)
+        p.addArc(tangent1End: a, tangent2End: b, radius: r)
+        p.closeSubpath()
+        return p
+    }
+}
+
+
+/// "Sharing is off": an upload arrow in a thin ring, struck through. Drawn with the same thin line as the other icons.
+struct NoUploadMark: View {
+    var body: some View {
+        GeometryReader { g in
+            let d = min(g.size.width, g.size.height)
+            ZStack {
+                Circle().stroke(lineWidth: 1.1)
+                Image(systemName: "arrow.up").font(.system(size: d * 0.5, weight: .medium))
+                Path { p in
+                    p.move(to: CGPoint(x: d * 0.2, y: d * 0.2))
+                    p.addLine(to: CGPoint(x: d * 0.8, y: d * 0.8))
+                }.stroke(style: StrokeStyle(lineWidth: 1.3, lineCap: .round))
+            }.frame(width: d, height: d)
+        }
+    }
 }
