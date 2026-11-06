@@ -637,6 +637,8 @@ struct PreviewWindow: View {
                     Link("info@oskarreus.ch", destination: URL(string: "mailto:info@oskarreus.ch")!).textSelection(.enabled)
                 }
                 Spacer(minLength: 0)
+                Text("STRÖM · \(t("Версия")) \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "?") (\(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "?"))")
+                    .font(.custom("Helvetica-Light", size: 11)).foregroundStyle(.secondary).textSelection(.enabled).frame(maxWidth: .infinity, alignment: .center).padding(.top, 4)
             }.font(.custom("Helvetica-Light", size: 13)).padding(26)
             }.frame(width: 500).frame(maxHeight: 560).background(.regularMaterial, in: RoundedRectangle(cornerRadius: 24)).glassEffect(.regular, in: .rect(cornerRadius: 24)).shadow(radius: 20)
                 .transition(reduceMotion ? .opacity : .modifier(active: GenieEffect(progress: 1, x: -180, y: 220), identity: GenieEffect(progress: 0, x: -180, y: 220)))
@@ -783,8 +785,8 @@ struct PreviewWindow: View {
         do {
             let data = try Bundle.main.bundleURL.bookmarkData(options: .suitableForBookmarkFile)
             try URL.writeBookmarkData(data, to: target)
-            let dark = NSApp.effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-            if let icon = Bundle.main.url(forResource: dark ? "STROM-icon-glass" : "STROM-icon-dark", withExtension: "icns").flatMap({ NSImage(contentsOf: $0) }) {
+            // Always the pale frosted-glass mark (like the BÜHNE icon): it reads on light and dark desktops.
+            if let icon = Bundle.main.url(forResource: "STROM-icon-glass", withExtension: "icns").flatMap({ NSImage(contentsOf: $0) }) {
                 _ = NSWorkspace.shared.setIcon(icon, forFile: target.path, options: [])
             }
         } catch { engine.report("Не удалось создать ярлык.", detail: error.localizedDescription) }
@@ -831,8 +833,10 @@ struct PreviewWindow: View {
     /// First window on first launch: only the language (and the shortcut choice). Terms follow in the next window.
     private var welcomeWindow: some View {
         let pack = agreementPacks[language] ?? agreementPacks["en"]!
-        return VStack(alignment: .leading, spacing: 18) {
-            Text("STRÖM").font(.custom("HelveticaNeue-Light", size: 34))
+        return VStack(spacing: 0) {
+            Spacer(minLength: 0)
+            VStack(alignment: .leading, spacing: 18) {
+            Text("STRÖM").font(.custom("HelveticaNeue-Light", size: 38))
             Divider().opacity(0.4)
             Text(pack.language).font(.custom("Helvetica-Light", size: 13)).foregroundStyle(.secondary)
             Picker("", selection: $language) { ForEach(agreementLanguages, id: \.code) { Text($0.name).tag($0.code) } }.labelsHidden().pickerStyle(.menu).fixedSize()
@@ -844,7 +848,14 @@ struct PreviewWindow: View {
                 Spacer()
                 Button("→") { agreementStep = 1 }.buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
             }
+            }.frame(width: 420)
+            Spacer(minLength: 0)
         }
+        // Same card as the terms windows that follow: the whole window, frosted, readable.
+        .padding(26)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 24)).glassEffect(.regular, in: .rect(cornerRadius: 24)).padding(18)
+        .transition(.opacity)
     }
     private var termsWindow: some View {
         let pack = agreementPacks[language] ?? agreementPacks["en"]!
